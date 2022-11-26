@@ -27,10 +27,12 @@ class Tensor {
 
   template <class... Args>
   requires((std::is_same_v<Args, size_t> && ...)) double& operator()(Args... indices) {
+    ASSERT(sizeof...(Args) < m_shape.size());
     size_t idx = 0;
     size_t is[] = {indices...};
     for (size_t i = 0; i < sizeof...(Args); ++i) {
       idx += is[i] * m_strides[i];
+      ASSERT(is[i] < m_shape[i]);
     }
     ASSERT(idx < m_data.size());
     return m_data[idx];
@@ -46,6 +48,8 @@ class Tensor {
   const double& operator[](size_t i) const { return m_data[i]; }
 
   size_t size() const { return m_size; }
+
+  std::span<const size_t> shape() const { return m_shape; }
 
  private:
   size_t m_size = 1;

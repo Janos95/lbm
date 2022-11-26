@@ -24,6 +24,18 @@ constexpr size_t Nt = 4000;   // number of timesteps
 // Lattice speeds / weights
 constexpr size_t NL = 9;
 
+// idxs = np.arange(NL)
+size_t idxs[NL] = {0, 1, 2, 3, 4, 5, 6, 7, 8};
+
+// cxs = np.array([0, 0, 1, 1, 1, 0,-1,-1,-1])
+constexpr double cxs[] = {0, 0, 1, 1, 1, 0, -1, -1, -1};
+// cys = np.array([0, 1, 1, 0,-1,-1,-1, 0, 1])
+constexpr double cys[] = {0, 1, 1, 0, -1, -1, -1, 0, 1};
+
+// weights = np.array([4/9,1/9,1/36,1/9,1/36,1/9,1/36,1/9,1/36]) # sums to 1
+constexpr double weights[] = {4. / 9, 1. / 9,  1. / 36, 1. / 9, 1. / 36,
+                              1. / 9, 1. / 36, 1. / 9,  1. / 36};
+
 // window size
 constexpr size_t kWidth = Nx;
 constexpr size_t kHeight = Ny;
@@ -192,19 +204,11 @@ static void meshgrid(Tensor& xs, Tensor& ys) {
   }
 }
 
+double square(double x) {
+  return x * x;
+}
+
 void Application::initializeLbm() {
-  std::vector<double> idxs(NL);
-  // idxs = np.arange(NL)
-  std::iota(idxs.begin(), idxs.end(), 0);
-
-  // cxs = np.array([0, 0, 1, 1, 1, 0,-1,-1,-1])
-  double cxs[] = {0, 0, 1, 1, 1, 0, -1, -1, -1};
-  // cys = np.array([0, 1, 1, 0,-1,-1,-1, 0, 1])
-  double cys[] = {0, 1, 1, 0, -1, -1, -1, 0, 1};
-
-  // weights = np.array([4/9,1/9,1/36,1/9,1/36,1/9,1/36,1/9,1/36]) # sums to 1
-  double weights[] = {4. / 9, 1. / 9, 1. / 36, 1. / 9, 1. / 36, 1. / 9, 1. / 36, 1. / 9, 1. / 36};
-
   // X, Y = np.meshgrid(range(Nx), range(Ny))
   Tensor X, Y;
   meshgrid(X, Y);
@@ -212,63 +216,53 @@ void Application::initializeLbm() {
   // Initial Conditions - flow to the right with some perturbations
   // F = np.ones((Ny,Nx,NL)) + 0.01*np.random.randn(Ny,Nx,NL)
   // F[:,:,3] += 2 * (1+0.2*np.cos(2*np.pi*X/Nx*4))
-  Tensor F({Ny, Nx, NL}, 1.);
+  m_F = Tensor({Ny, Nx, NL}, 1.);
+  m_Feq = Tensor({Ny, Nx, NL}, 1.);
+
   std::default_random_engine gen(0);
   std::normal_distribution<double> dist;
 
   for (size_t x = 0; x < Nx; ++x) {
     for (size_t y = 0; y < Ny; ++y) {
       for (size_t l = 0; l < NL; ++l) {
-        F(x, y, l) = 1. + 0.01 * dist(gen);
+        m_F(x, y, l) = 1. + 0.01 * dist(gen);
         if (l == 3) {
-          F(x, y, l) += 2. * (1. + 0.2 * cos(2. * pi * X(x, y) / Nx * 4));
+          m_F(x, y, l) += 2. * (1. + 0.2 * cos(2. * pi * X(x, y) / Nx * 4));
         }
       }
     }
   }
 
   // rho = np.sum(F,2)
-  // double rho = 0;
-  // for(double f : F) {
-  //  rho += f;
-  //}
+  m_rho = Tensor({Nx, Ny}, 0.);
+  for (size_t x = 0; x < Nx; ++x) {
+    for (size_t y = 0; y < Ny; ++y) {
+      double& sum = m_rho(x, y);
+      sum = 0.;
+      for (size_t l = 0; l < NL; ++l) {
+        sum += m_F(x, y, l);
+      }
+    }
+  }
 
   // for i in idxs:
   //   F[:,:,i] *= rho0 / rho
-
-  for (auto i : idxs) {
+  for (size_t x = 0; x < Nx; ++x) {
+    for (size_t y = 0; y < Ny; ++y) {
+      for (auto l : idxs) {
+        m_F(x, y, l) *= rho0 / m_rho(x, y);
+      }
+    }
   }
 
-  // # Cylinder boundary
+  // Cylinder boundary
   // cylinder = (X - Nx/4)**2 + (Y - Ny/2)**2 < (Ny/4)**2
-  //
-  //
-  // # Simulation Main Loop
-  // for it in range(Nt):
-  //
-  // # Drift
-  //   for i, cx, cy in zip(idxs, cxs, cys):
-  //     F[:,:,i] = np.roll(F[:,:,i], cx, axis=1)
-  //     F[:,:,i] = np.roll(F[:,:,i], cy, axis=0)
-  //
-  // # Set reflective boundaries
-  //   bndryF = F[cylinder,:]
-  //   bndryF = bndryF[:,[0,5,6,7,8,1,2,3,4]]
-  //
-  // # Calculate fluid variables
-  //   rho = np.sum(F,2)
-  //   ux  = np.sum(F*cxs,2) / rho
-  //   uy  = np.sum(F*cys,2) / rho
-  //
-  // # Apply Collision
-  //   Feq = np.zeros(F.shape)
-  //   for i, cx, cy, w in zip(idxs, cxs, cys, weights):
-  //     Feq[:,:,i] = rho*w* (1 + 3*(cx*ux+cy*uy) + 9*(cx*ux+cy*uy)**2/2 - 3*(ux**2+uy**2)/2)
-  //
-  //   F += -(1.0/tau) * (F - Feq)
-  //
-  // # Apply boundary
-  //   F[cylinder,:] = bndryF
+  m_cylinder = Tensor({Nx, Ny});
+  for (size_t x = 0; x < Nx; ++x) {
+    for (size_t y = 0; y < Ny; ++y) {
+      m_cylinder(x, y) = square(X(x, y) - Nx / 4) + square(Y(x, y) - Ny / 2) < square(Ny / 4);
+    }
+  }
 }
 
 Application::Application() {
@@ -291,7 +285,84 @@ void Application::loop() {
   }
 }
 
-void Application::updateLbm() {}
+void Application::updateLbm() {
+  // # Simulation Main Loop
+  // for it in range(Nt):
+  //
+  // Drift
+  //   for i, cx, cy in zip(idxs, cxs, cys):
+  //     F[:,:,i] = np.roll(F[:,:,i], cx, axis=1)
+  //     F[:,:,i] = np.roll(F[:,:,i], cy, axis=0)
+  for (size_t x = 0; x < Nx; ++x) {
+    for (size_t y = 0; y < Ny; ++y) {
+      for (size_t l = 0; l < NL; ++l) {
+        NOT_IMPLEMENTED;
+      }
+    }
+  }
+
+  //
+  // # Set reflective boundaries
+  //   bndryF = F[cylinder,:]
+  //   bndryF = bndryF[:,[0,5,6,7,8,1,2,3,4]]
+  //
+  //  Calculate fluid variables
+  //   rho = np.sum(F,2)
+  //   ux  = np.sum(F*cxs,2) / rho
+  //   uy  = np.sum(F*cys,2) / rho
+  for (size_t x = 0; x < Nx; ++x) {
+    for (size_t y = 0; y < Ny; ++y) {
+      double& rho = m_rho(x, y);
+      double& ux = m_ux(x, y);
+      double& uy = m_uy(x, y);
+      rho = 0.;
+      for (size_t l = 0; l < NL; ++l) {
+        rho += m_F(x, y, l);
+        ux += m_F(x, y, l) * cxs[l];
+        uy += m_F(x, y, l) * cys[l];
+      }
+      for (size_t l = 0; l < NL; ++l) {
+      }
+      ux /= rho;
+      uy /= rho;
+    }
+  }
+
+  // # Apply Collision
+  //   Feq = np.zeros(F.shape)
+  //   for i, cx, cy, w in zip(idxs, cxs, cys, weights):
+  //     Feq[:,:,i] = rho*w* (1 + 3*(cx*ux+cy*uy) + 9*(cx*ux+cy*uy)**2/2 - 3*(ux**2+uy**2)/2)
+  for (size_t x = 0; x < Nx; ++x) {
+    for (size_t y = 0; y < Ny; ++y) {
+      double ux = m_ux(x, y);
+      double uy = m_uy(x, y);
+      double rho = m_rho(x, y);
+      for (size_t l = 0; l < NL; ++l) {
+        m_Feq(x, y, l) =
+            rho * weights[l] *
+            (1. + 3. * (cxs[l] * ux + cys[l] * uy) + 9 * square(cxs[l] * ux + cys[l] * uy) / 2 -
+             3 * (square(ux) + square(uy)) / 2);
+      }
+    }
+  }
+
+  // F += -(1.0/tau) * (F - Feq)
+  for (size_t x = 0; x < Nx; ++x) {
+    for (size_t y = 0; y < Ny; ++y) {
+      for (size_t l = 0; l < NL; ++l) {
+        m_F(x, y, l) += -(1. / tau) * (m_F(x, y, l) - m_Feq(x, y, l));
+      }
+    }
+  }
+
+  // # Apply boundary
+  for (auto [x, y] : m_cylinder) {
+    for (size_t l = 0; l < NL; ++l) {
+      m_F(x, y, l) = boundaryF[i];
+    }
+  }
+  //   F[cylinder,:] = bndryF
+}
 
 void Application::populateBuffers() {
   // Create buffers

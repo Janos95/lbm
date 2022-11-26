@@ -5,8 +5,8 @@
 #include "dump_utils.h"
 #include "wgpu.h"
 
-#include <Math/Vec.h>
 #include <Math/Tensor.h>
+#include <Math/Vec.h>
 
 #include <span>
 #include <vector>
@@ -51,6 +51,11 @@ class Application {
   std::vector<float> m_vertex_data;
   std::vector<uint32_t> m_index_data;
 
+  Tensor m_F, m_Feq;
+  Tensor m_rho;
+  Tensor m_ux, m_uy;
+
+  std::vector<std::pair<size_t, size_t>> m_cylinder;
 };
 
 }  // namespace oak
