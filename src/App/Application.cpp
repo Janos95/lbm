@@ -6,7 +6,11 @@
 #include "ColorMaps.h"
 
 #include <fmt/core.h>
+
+#include <numbers>
+#include <numeric>
 #include <random>
+#include <stdexcept>
 
 namespace oak {
 
@@ -19,6 +23,12 @@ constexpr size_t Nt = 4000;   // number of timesteps
 
 // Lattice speeds / weights
 constexpr size_t NL = 9;
+
+// window size
+constexpr size_t kWidth = Nx;
+constexpr size_t kHeight = Ny;
+
+constexpr double pi = std::numbers::pi;
 
 constexpr const char* kShader = R"(
  struct VertexInput {
@@ -171,9 +181,9 @@ void Application::initializeWindow() {
   }
 }
 
-static void meshgrid(Tensor2& xs, Tensor2& ys) {
-  xs = Tensor2(Nx, Ny, 0);
-  ys = Tensor2(Nx, Ny, 0);
+static void meshgrid(Tensor& xs, Tensor& ys) {
+  xs = Tensor({Nx, Ny}, 0);
+  ys = Tensor({Nx, Ny}, 0);
   for (size_t x = 0; x < Nx; ++x) {
     for (size_t y = 0; y < Ny; ++y) {
       xs(x, y) = double(x);
@@ -202,13 +212,18 @@ void Application::initializeLbm() {
   // Initial Conditions - flow to the right with some perturbations
   // F = np.ones((Ny,Nx,NL)) + 0.01*np.random.randn(Ny,Nx,NL)
   // F[:,:,3] += 2 * (1+0.2*np.cos(2*np.pi*X/Nx*4))
-  Tensor F(Ny, Nx, NL, 1.);
+  Tensor F({Ny, Nx, NL}, 1.);
   std::default_random_engine gen(0);
   std::normal_distribution<double> dist;
-  for (size_t i = 0; i < Ny * Nx * NL; ++i) {
-    F[i] = 1. + 0.01 * dist(gen);
-    if (i % NL == 3) {
-      F[i] += 2. * (1. + 0.2 * cos(2. * M_PI * X[] / Nx * 4));
+
+  for (size_t x = 0; x < Nx; ++x) {
+    for (size_t y = 0; y < Ny; ++y) {
+      for (size_t l = 0; l < NL; ++l) {
+        F(x, y, l) = 1. + 0.01 * dist(gen);
+        if (l == 3) {
+          F(x, y, l) += 2. * (1. + 0.2 * cos(2. * pi * X(x, y) / Nx * 4));
+        }
+      }
     }
   }
 
@@ -279,23 +294,13 @@ void Application::loop() {
 void Application::updateLbm() {}
 
 void Application::populateBuffers() {
-  std::vector<float> vertex_data;
-  vertex_data.reserve(m_grid.points.size());
-  for (size_t i = 0; i < m_grid.points.size(); ++i) {
-    auto u = float(m_phasefield[i]);
-    auto p = m_grid.points[i];
-    vertex_data.insert(vertex_data.end(), {float(p.x), float(p.y), 0.f, 1.f, u, 0, 0, 0});
-  }
-
-  auto& index_data = m_grid.corners;
-
   // Create buffers
   m_index_buffer =
-      createBufferFromData(m_device, "Index Buffer", index_data.data(),
-                           index_data.size() * sizeof(uint32_t), wgpu::BufferUsage::Index);
+      createBufferFromData(m_device, "Index Buffer", m_index_data.data(),
+                           m_index_data.size() * sizeof(uint32_t), wgpu::BufferUsage::Index);
   m_vertex_buffer =
-      createBufferFromData(m_device, "Vertex Buffer", vertex_data.data(),
-                           vertex_data.size() * sizeof(float), wgpu::BufferUsage::Vertex);
+      createBufferFromData(m_device, "Vertex Buffer", m_vertex_data.data(),
+                           m_vertex_data.size() * sizeof(float), wgpu::BufferUsage::Vertex);
 }
 
 void Application::frame() {
@@ -324,7 +329,7 @@ void Application::frame() {
     pass.SetVertexBuffer(0, m_vertex_buffer);
     pass.SetIndexBuffer(m_index_buffer, wgpu::IndexFormat::Uint32);
     pass.SetBindGroup(0, m_bind_group);
-    pass.DrawIndexed(uint32_t(m_grid.corners.size()));
+    pass.DrawIndexed(uint32_t(m_index_data.size()));
     pass.End();
   }
   auto commands = encoder.Finish();

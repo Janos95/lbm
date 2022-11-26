@@ -15,7 +15,7 @@ TEST_CASE("Tensor") {
   Tensor t2({2, 3, 4}, 1.);
   Tensor t3({2, 3, 4});
   for (size_t i = 0; i < shape[0]; ++i) {
-    for (size_t j = 0; i < shape[1]; ++j) {
+    for (size_t j = 0; j < shape[1]; ++j) {
       for (size_t k = 0; k < shape[2]; ++k) {
         t3(i, j, k) = t1(i, j, k) + t2(i, j, k);
       }

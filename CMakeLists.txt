@@ -12,7 +12,6 @@ include(cmake/Analyzers.cmake)
 find_package(fmt)
 find_package(doctest)
 find_package(glfw3)
-find_package(Eigen3)
 
 add_subdirectory(third_party)
 

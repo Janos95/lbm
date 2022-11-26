@@ -18,6 +18,12 @@ target_link_libraries(OakApp
         webgpu_dawn
         webgpu_cpp
         webgpu_glfw
+    dawncpp
+    dawn_proc
+    dawn_common
+    dawn_glfw
+    dawn_native
+    dawn_wire
         glfw
         )
 

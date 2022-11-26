@@ -48,7 +48,9 @@ class Application {
   wgpu::RenderPipeline m_pipeline;
   wgpu::SwapChain m_swapchain;
 
-  std::vector<double> m_phasefield;
+  std::vector<float> m_vertex_data;
+  std::vector<uint32_t> m_index_data;
+
 };
 
 }  // namespace oak

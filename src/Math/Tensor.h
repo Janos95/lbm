@@ -16,7 +16,7 @@ class Tensor {
     for (size_t i = 0; i < shape.size(); ++i) {
       m_size *= shape.begin()[i];
       if (i > 0) {
-        m_strides[i] = m_strides[i - 1] * m_shape[i];
+        m_strides[i] = m_strides[i - 1] * m_shape[i - 1];
       }
     }
     m_data.resize(m_size, val);
@@ -26,13 +26,13 @@ class Tensor {
       : Tensor(std::span<const size_t>(shape.begin(), shape.size()), val) {}
 
   template <class... Args>
-    requires((std::is_same_v<Args, size_t> && ...))
-  double& operator()(Args... indices) {
+  requires((std::is_same_v<Args, size_t> && ...)) double& operator()(Args... indices) {
     size_t idx = 0;
     size_t is[] = {indices...};
     for (size_t i = 0; i < sizeof...(Args); ++i) {
       idx += is[i] * m_strides[i];
     }
+    ASSERT(idx < m_data.size());
     return m_data[idx];
   }
 
