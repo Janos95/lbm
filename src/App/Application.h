@@ -23,14 +23,18 @@ class Application {
 
   void frame();
 
-  void updateLbm();
+  void update_lbm();
 
-  void populateBuffers();
+  void populate_buffers();
 
  private:
-  void initializeWindow();
-  void initializeWebGpu();
-  void initializeLbm();
+  void initialize_window();
+  void initialize_webgpu();
+
+  void prepare_compute_pipeline();
+  void encode_compute_pass(wgpu::CommandEncoder&);
+
+  void reset_lbm();
 
   GLFWwindow* m_window = nullptr;
 
@@ -48,6 +52,13 @@ class Application {
   wgpu::RenderPipeline m_pipeline;
   wgpu::SwapChain m_swapchain;
 
+  // lbm compute pipeline
+  wgpu::ShaderModule m_lbm_shader;
+  wgpu::ProgrammableStageDescriptor m_lbm_descriptor;
+  wgpu::ComputePipeline m_lbm_pipeline;
+  wgpu::BindGroup m_compute_constants_bind_group;
+  wgpu::BindGroup m_compute_bind_groups[3];
+
   std::vector<float> m_vertex_data;
   std::vector<uint32_t> m_index_data;
 
@@ -55,7 +66,7 @@ class Application {
   Tensor m_rho;
   Tensor m_ux, m_uy;
 
-  std::vector<std::pair<size_t, size_t>> m_cylinder;
+  Tensor m_cylinder;
 };
 
 }  // namespace oak

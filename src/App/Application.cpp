@@ -15,22 +15,22 @@
 namespace oak {
 
 // Simulation parameters
-constexpr size_t Nx = 400;    // resolution x-dir
+constexpr size_t Nx = 500;    // resolution x-dir
 constexpr size_t Ny = 100;    // resolution y-dir
 constexpr double rho0 = 100;  // average density
 constexpr double tau = 0.6;   // collision timesclae
-constexpr size_t Nt = 4000;   // number of timesteps
+// constexpr size_t Nt = 4000;   // number of timesteps
 
 // Lattice speeds / weights
 constexpr size_t NL = 9;
 
 // idxs = np.arange(NL)
-size_t idxs[NL] = {0, 1, 2, 3, 4, 5, 6, 7, 8};
+// constexpr size_t idxs[NL] = {0, 1, 2, 3, 4, 5, 6, 7, 8};
 
 // cxs = np.array([0, 0, 1, 1, 1, 0,-1,-1,-1])
-constexpr double cxs[] = {0, 0, 1, 1, 1, 0, -1, -1, -1};
+constexpr int cxs[] = {0, 0, 1, 1, 1, 0, -1, -1, -1};
 // cys = np.array([0, 1, 1, 0,-1,-1,-1, 0, 1])
-constexpr double cys[] = {0, 1, 1, 0, -1, -1, -1, 0, 1};
+constexpr int cys[] = {0, 1, 1, 0, -1, -1, -1, 0, 1};
 
 // weights = np.array([4/9,1/9,1/36,1/9,1/36,1/9,1/36,1/9,1/36]) # sums to 1
 constexpr double weights[] = {4. / 9, 1. / 9,  1. / 36, 1. / 9, 1. / 36,
@@ -40,7 +40,7 @@ constexpr double weights[] = {4. / 9, 1. / 9,  1. / 36, 1. / 9, 1. / 36,
 constexpr size_t kWidth = Nx;
 constexpr size_t kHeight = Ny;
 
-constexpr double pi = std::numbers::pi;
+// constexpr double pi = std::numbers::pi;
 
 constexpr const char* kShader = R"(
  struct VertexInput {
@@ -71,7 +71,120 @@ constexpr const char* kShader = R"(
 }
 )";
 
-void Application::initializeWebGpu() {
+void Application::prepare_compute_pipeline() {
+  // Compute shader
+  m_lbm_shader = create_shader_from_file(m_device, "lbm.wgsl", "lbm shader");
+  m_lbm_descriptor = wgpu::ProgrammableStageDescriptor{
+      .module     = m_lbm_shader,
+      .entryPoint = "main",
+  };
+
+  wgpu::ComputePipelineDescriptor descriptor{
+      .label = "lbm_pipeline",
+      .compute = m_lbm_descriptor,
+  };
+
+  // Compute pipeline
+  m_lbm_pipeline = m_device.CreateComputePipeline(&descriptor);
+
+  // blur_pipeline = wgpuDeviceCreateComputePipeline(
+  //     wgpu_context->device, &(WGPUComputePipelineDescriptor){
+  //                               .label = "image_blur_render_pipeline",
+  //                               .compute = blur_comp_shader.programmable_stage_descriptor,
+  //                           });
+  //  ASSERT(blur_pipeline != NULL);
+
+  // Partial clean-up
+  // wgpu_shader_release(&blur_comp_shader);
+}
+
+//  auto backbufferView = m_swapchain.GetCurrentTextureView();
+//  backbufferView.SetLabel("Back Buffer Texture View");
+
+//  wgpu::RenderPassColorAttachment attachment{
+//      .view = backbufferView,
+//      .loadOp = wgpu::LoadOp::Clear,
+//      .storeOp = wgpu::StoreOp::Store,
+//      .clearValue = {0., 0., 0., 1.},
+//  };
+
+//  wgpu::RenderPassDescriptor renderPass{
+//      .label = "Main Render Pass",
+//      .colorAttachmentCount = 1,
+//      .colorAttachments = &attachment,
+//  };
+
+//  auto pass = encoder.BeginRenderPass(&renderPass);
+//  pass.SetPipeline(m_pipeline);
+//  pass.SetVertexBuffer(0, m_vertex_buffer);
+//  pass.SetIndexBuffer(m_index_buffer, wgpu::IndexFormat::Uint32);
+//  pass.SetBindGroup(0, m_bind_group);
+//  pass.DrawIndexed(uint32_t(m_index_data.size()));
+//  pass.End();
+//}
+
+void Application::encode_compute_pass(wgpu::CommandEncoder& encoder) {
+  // wgpu_context->cpass_enc = wgpuCommandEncoderBeginComputePass(wgpu_context->cmd_enc, NULL);
+  auto pass = encoder.BeginComputePass();
+
+  // wgpuComputePassEncoderSetPipeline(wgpu_context->cpass_enc, blur_pipeline);
+  pass.SetPipeline(m_lbm_pipeline);
+
+  // wgpuComputePassEncoderSetBindGroup(wgpu_context->cpass_enc, 0, compute_constants_bind_group, 0,
+  //                                    NULL);
+  pass.SetBindGroup(0, m_compute_constants_bind_group);
+
+  // wgpuComputePassEncoderSetBindGroup(wgpu_context->cpass_enc, 1, compute_bind_groups[0], 0,
+  // NULL);
+  pass.SetBindGroup(1, m_compute_bind_groups[0]);
+
+  const uint32_t tile_dim = 128;
+  const uint32_t filter_size = 15;
+  const uint32_t block_dim = tile_dim - filter_size - 1;
+  const uint32_t batch[2] = {4, 4};
+  const uint32_t iterations = 2;
+
+  const auto wg_count_x = uint32_t(std::ceil(float(Nx) / float(block_dim)));
+  const auto wg_count_y = uint32_t(std::ceil(float(Ny) / float(batch[1])));
+
+  // wgpuComputePassEncoderDispatchWorkgroups(wgpu_context->cpass_enc,
+  //                                          ceil((float)image_width / block_dim),
+  //                                          ceil((float)image_height / batch[1]), 1);
+  pass.DispatchWorkgroups(wg_count_x, wg_count_y, 1);
+
+  // wgpuComputePassEncoderSetBindGroup(wgpu_context->cpass_enc, 1, compute_bind_groups[1], 0,
+  // NULL);
+  pass.SetBindGroup(0, m_compute_bind_groups[1]);
+
+  // wgpuComputePassEncoderDispatchWorkgroups(wgpu_context->cpass_enc,
+  //                                          ceil((float)image_height / block_dim),
+  //                                          ceil((float)image_width / batch[1]), 1);
+  pass.DispatchWorkgroups(wg_count_x, wg_count_y, 1);
+
+  for (uint32_t i = 0; i < iterations; ++i) {
+    // wgpuComputePassEncoderSetBindGroup(wgpu_context->cpass_enc, 1, compute_bind_groups[2], 0,
+    // NULL);
+    pass.SetBindGroup(1, m_compute_bind_groups[2]);
+    // wgpuComputePassEncoderDispatchWorkgroups(wgpu_context->cpass_enc,
+    //                                          ceil((float)image_width / block_dim),
+    //                                          ceil((float)image_height / batch[1]), 1);
+    pass.DispatchWorkgroups(wg_count_x, wg_count_y, 1);
+
+    // wgpuComputePassEncoderSetBindGroup(wgpu_context->cpass_enc, 1, compute_bind_groups[1], 0,
+    // NULL);
+    pass.SetBindGroup(1, m_compute_bind_groups[1]);
+    // wgpuComputePassEncoderDispatchWorkgroups(wgpu_context->cpass_enc,
+    //                                          ceil((float)image_height / block_dim),
+    //                                          ceil((float)image_width / batch[1]), 1);
+    pass.DispatchWorkgroups(wg_count_x, wg_count_y, 1);
+  }
+
+  // wgpuComputePassEncoderEnd(wgpu_context->cpass_enc);
+  pass.End();
+  // WGPU_RELEASE_RESOURCE(ComputePassEncoder, wgpu_context->cpass_enc)
+}
+
+void Application::initialize_webgpu() {
   m_instance = wgpu::CreateInstance();
 
   // Get Adapter
@@ -82,7 +195,7 @@ void Application::initializeWebGpu() {
       },
       &m_adapter);
 
-  DumpAdapter(m_adapter);
+  // DumpAdapter(m_adapter);
 
   // Get device
   m_device = m_adapter.CreateDevice();
@@ -93,7 +206,7 @@ void Application::initializeWebGpu() {
   // Logging is enabled as soon as the callback is setup.
   m_device.SetLoggingCallback(cb::Logging, nullptr);
 
-  DumpDevice(m_device);
+  // DumpDevice(m_device);
 
   // Get surface
   m_surface = wgpu::glfw::CreateSurfaceForWindow(m_instance, m_window);
@@ -175,7 +288,7 @@ void Application::initializeWebGpu() {
   m_bind_group = makeBindGroup(m_device, bgl, {{0, m_sampler}, {1, m_colormap.CreateView()}});
 }
 
-void Application::initializeWindow() {
+void Application::initialize_window() {
   glfwSetErrorCallback([](int code, const char* message) {
     throw std::runtime_error(fmt::format("GLFW error: {} - {}", code, message));
   });
@@ -191,31 +304,18 @@ void Application::initializeWindow() {
   if (m_window == nullptr) {
     throw std::runtime_error("Failed to create window");
   }
+  printf("Window initialized\n");
 }
 
-static void meshgrid(Tensor& xs, Tensor& ys) {
-  xs = Tensor({Nx, Ny}, 0);
-  ys = Tensor({Nx, Ny}, 0);
-  for (size_t x = 0; x < Nx; ++x) {
-    for (size_t y = 0; y < Ny; ++y) {
-      xs(x, y) = double(x);
-      ys(x, y) = double(y);
-    }
-  }
-}
-
-double square(double x) {
+inline double square(double x) {
   return x * x;
 }
 
-void Application::initializeLbm() {
-  // X, Y = np.meshgrid(range(Nx), range(Ny))
-  Tensor X, Y;
-  meshgrid(X, Y);
-
+void Application::reset_lbm() {
   // Initial Conditions - flow to the right with some perturbations
   // F = np.ones((Ny,Nx,NL)) + 0.01*np.random.randn(Ny,Nx,NL)
   // F[:,:,3] += 2 * (1+0.2*np.cos(2*np.pi*X/Nx*4))
+
   m_F = Tensor({Ny, Nx, NL}, 1.);
   m_Feq = Tensor({Ny, Nx, NL}, 1.);
 
@@ -225,22 +325,22 @@ void Application::initializeLbm() {
   for (size_t x = 0; x < Nx; ++x) {
     for (size_t y = 0; y < Ny; ++y) {
       for (size_t l = 0; l < NL; ++l) {
-        m_F(x, y, l) = 1. + 0.01 * dist(gen);
+        m_F(y, x, l) = 1. + 0.01 * dist(gen);
         if (l == 3) {
-          m_F(x, y, l) += 2. * (1. + 0.2 * cos(2. * pi * X(x, y) / Nx * 4));
+          m_F(y, x, l) = 2.3;
         }
       }
     }
   }
 
   // rho = np.sum(F,2)
-  m_rho = Tensor({Nx, Ny}, 0.);
+  m_rho = Tensor({Ny, Nx}, 0.);
   for (size_t x = 0; x < Nx; ++x) {
     for (size_t y = 0; y < Ny; ++y) {
-      double& sum = m_rho(x, y);
+      double& sum = m_rho(y, x);
       sum = 0.;
       for (size_t l = 0; l < NL; ++l) {
-        sum += m_F(x, y, l);
+        sum += m_F(y, x, l);
       }
     }
   }
@@ -249,26 +349,31 @@ void Application::initializeLbm() {
   //   F[:,:,i] *= rho0 / rho
   for (size_t x = 0; x < Nx; ++x) {
     for (size_t y = 0; y < Ny; ++y) {
-      for (auto l : idxs) {
-        m_F(x, y, l) *= rho0 / m_rho(x, y);
+      for (size_t l = 0; l < NL; ++l) {
+        m_F(y, x, l) *= rho0 / m_rho(y, x);
       }
     }
   }
 
   // Cylinder boundary
   // cylinder = (X - Nx/4)**2 + (Y - Ny/2)**2 < (Ny/4)**2
-  m_cylinder = Tensor({Nx, Ny});
+  m_cylinder = Tensor({Ny, Nx});
   for (size_t x = 0; x < Nx; ++x) {
     for (size_t y = 0; y < Ny; ++y) {
-      m_cylinder(x, y) = square(X(x, y) - Nx / 4) + square(Y(x, y) - Ny / 2) < square(Ny / 4);
+      bool is_inside = square(double(x) - Nx / 4.) + square(double(y) - Ny / 2.) < square(Ny / 4.);
+      m_cylinder(y, x) = double(is_inside);
     }
   }
+
+  m_rho = Tensor({Ny, Nx});
+  m_ux = Tensor({Ny, Nx});
+  m_uy = Tensor({Ny, Nx});
 }
 
 Application::Application() {
-  initializeWindow();
-  initializeWebGpu();
-  initializeLbm();
+  initialize_window();
+  initialize_webgpu();
+  reset_lbm();
 }
 
 Application::~Application() {
@@ -278,14 +383,14 @@ Application::~Application() {
 
 void Application::loop() {
   while (glfwWindowShouldClose(m_window) == 0) {
-    updateLbm();
-    populateBuffers();
+    update_lbm();
+    populate_buffers();
     frame();
     glfwPollEvents();
   }
 }
 
-void Application::updateLbm() {
+void Application::update_lbm() {
   // # Simulation Main Loop
   // for it in range(Nt):
   //
@@ -293,35 +398,52 @@ void Application::updateLbm() {
   //   for i, cx, cy in zip(idxs, cxs, cys):
   //     F[:,:,i] = np.roll(F[:,:,i], cx, axis=1)
   //     F[:,:,i] = np.roll(F[:,:,i], cy, axis=0)
+
+  auto role = [](int i, int N) {
+    if (i >= N)
+      return 0;
+    if (i < 0)
+      return N - 1;
+    return i;
+  };
   for (size_t x = 0; x < Nx; ++x) {
     for (size_t y = 0; y < Ny; ++y) {
       for (size_t l = 0; l < NL; ++l) {
-        NOT_IMPLEMENTED;
+        int x1 = role(int(x) + cxs[l], Nx);
+        int y1 = role(int(y) + cys[l], Ny);
+        m_F(y, x, l) = m_F(size_t(y1), size_t(x1), l);
       }
     }
   }
 
-  //
   // # Set reflective boundaries
   //   bndryF = F[cylinder,:]
   //   bndryF = bndryF[:,[0,5,6,7,8,1,2,3,4]]
-  //
+  for (size_t x = 0; x < Nx; ++x) {
+    for (size_t y = 0; y < Ny; ++y) {
+      constexpr size_t map[4][2] = {{1, 5}, {2, 6}, {3, 7}, {4, 8}};
+      for (const auto* ls : map) {
+        std::swap(m_F(y, x, ls[0]), m_F(y, x, ls[1]));
+      }
+    }
+  }
+
   //  Calculate fluid variables
   //   rho = np.sum(F,2)
   //   ux  = np.sum(F*cxs,2) / rho
   //   uy  = np.sum(F*cys,2) / rho
   for (size_t x = 0; x < Nx; ++x) {
     for (size_t y = 0; y < Ny; ++y) {
-      double& rho = m_rho(x, y);
-      double& ux = m_ux(x, y);
-      double& uy = m_uy(x, y);
+      double& rho = m_rho(y, x);
+      double& ux = m_ux(y, x);
+      double& uy = m_uy(y, x);
       rho = 0.;
+      ux = 0.;
+      uy = 0.;
       for (size_t l = 0; l < NL; ++l) {
-        rho += m_F(x, y, l);
-        ux += m_F(x, y, l) * cxs[l];
-        uy += m_F(x, y, l) * cys[l];
-      }
-      for (size_t l = 0; l < NL; ++l) {
+        rho += m_F(y, x, l);
+        ux += m_F(y, x, l) * double(cxs[l]);
+        uy += m_F(y, x, l) * double(cys[l]);
       }
       ux /= rho;
       uy /= rho;
@@ -334,14 +456,14 @@ void Application::updateLbm() {
   //     Feq[:,:,i] = rho*w* (1 + 3*(cx*ux+cy*uy) + 9*(cx*ux+cy*uy)**2/2 - 3*(ux**2+uy**2)/2)
   for (size_t x = 0; x < Nx; ++x) {
     for (size_t y = 0; y < Ny; ++y) {
-      double ux = m_ux(x, y);
-      double uy = m_uy(x, y);
-      double rho = m_rho(x, y);
+      Vec2 u(m_ux(y, x), m_uy(y, x));
+      double rho = m_rho(y, x);
       for (size_t l = 0; l < NL; ++l) {
-        m_Feq(x, y, l) =
-            rho * weights[l] *
-            (1. + 3. * (cxs[l] * ux + cys[l] * uy) + 9 * square(cxs[l] * ux + cys[l] * uy) / 2 -
-             3 * (square(ux) + square(uy)) / 2);
+        Vec2 c(cxs[l], cys[l]);
+        double uc = dot(u, c);
+        double uc2 = uc * uc;
+        double uu = dot(u, u);
+        m_Feq(y, x, l) = rho * weights[l] * (1. + 3. * uc + 9. * uc2 / 2. - 3. * uu * uu / 2.);
       }
     }
   }
@@ -350,21 +472,69 @@ void Application::updateLbm() {
   for (size_t x = 0; x < Nx; ++x) {
     for (size_t y = 0; y < Ny; ++y) {
       for (size_t l = 0; l < NL; ++l) {
-        m_F(x, y, l) += -(1. / tau) * (m_F(x, y, l) - m_Feq(x, y, l));
+        m_F(y, x, l) += -(1. / tau) * (m_F(y, x, l) - m_Feq(y, x, l));
       }
     }
   }
 
   // # Apply boundary
-  for (auto [x, y] : m_cylinder) {
-    for (size_t l = 0; l < NL; ++l) {
-      m_F(x, y, l) = boundaryF[i];
+  //   F[cylinder,:] = bndryF
+  for (size_t x = 0; x < Nx; ++x) {
+    for (size_t y = 0; y < Ny; ++y) {
+      if (m_cylinder(y, x) == 0.) {
+        continue;
+      }
+      for (size_t l = 0; l < NL; ++l) {
+        m_F(y, x, l) = m_F(y, x, l);
+      }
     }
   }
-  //   F[cylinder,:] = bndryF
 }
 
-void Application::populateBuffers() {
+inline void create_grid_mesh(Vec2 min,
+                             Vec2 max,
+                             Vec2u grid_size,
+                             const Tensor& ux,
+                             const Tensor& uy,
+                             std::vector<float>& vertex_data,
+                             std::vector<uint32_t>& index_data) {
+  auto to1dFrom2d = [grid_size](size_t x, size_t y) { return uint32_t(x + y * grid_size.x); };
+
+  auto rows = grid_size.y;
+  auto columns = grid_size.x;
+  vertex_data.reserve(rows * columns);
+  for (size_t y = 0; y < rows; ++y) {
+    for (size_t x = 0; x < columns; ++x) {
+      auto px = (max.x - min.x) * double(x) / double(columns - 1) + min.x;
+      auto py = (max.y - min.y) * double(y) / double(rows - 1) + min.y;
+      auto u = Vec2(ux(y, x), uy(y, x)).norm();
+      vertex_data.insert(vertex_data.end(), {float(px), float(py), 0.f, 1.f, float(u), 0, 0, 0});
+    }
+  }
+
+  index_data.reserve((rows - 1) * (columns - 1) * 2);
+  for (size_t y = 0; y < rows - 1; ++y) {
+    for (size_t x = 0; x < columns - 1; ++x) {
+      // (x,y+1) ---- (x+1,y+1)
+      //   |          /   |
+      //   |       /      |
+      //   |    /         |
+      //   | /            |
+      // (x,y) ------- (x+1,y)
+      auto v0 = to1dFrom2d(x, y), v1 = to1dFrom2d(x + 1, y), v2 = to1dFrom2d(x + 1, y + 1);
+      auto w0 = to1dFrom2d(x, y), w1 = to1dFrom2d(x + 1, y + 1), w2 = to1dFrom2d(x, y + 1);
+      index_data.insert(index_data.end(), {uint32_t(v0), uint32_t(v1), uint32_t(v2), uint32_t(w0),
+                                           uint32_t(w1), uint32_t(w2)});
+    }
+  }
+}
+
+void Application::populate_buffers() {
+  m_index_data.clear();
+  m_vertex_data.clear();
+
+  create_grid_mesh({-1, -0.2}, {1, 0.2}, {Nx, Ny}, m_ux, m_uy, m_vertex_data, m_index_data);
+
   // Create buffers
   m_index_buffer =
       createBufferFromData(m_device, "Index Buffer", m_index_data.data(),
@@ -389,13 +559,13 @@ void Application::frame() {
         .clearValue = {0., 0., 0., 1.},
     };
 
-    wgpu::RenderPassDescriptor renderPass{
+    wgpu::RenderPassDescriptor descriptor{
         .label = "Main Render Pass",
         .colorAttachmentCount = 1,
         .colorAttachments = &attachment,
     };
 
-    auto pass = encoder.BeginRenderPass(&renderPass);
+    auto pass = encoder.BeginRenderPass(&descriptor);
     pass.SetPipeline(m_pipeline);
     pass.SetVertexBuffer(0, m_vertex_buffer);
     pass.SetIndexBuffer(m_index_buffer, wgpu::IndexFormat::Uint32);

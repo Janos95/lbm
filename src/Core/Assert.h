@@ -3,9 +3,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#if !defined(__PRETTY_FUNCTION__)
+#ifdef _MSC_VER // Visual Studio
 #define OAK_PRETTY_FUNCTION __FUNCSIG__
-#elif
+#else
 #define OAK_PRETTY_FUNCTION __PRETTY_FUNCTION__
 #endif
 

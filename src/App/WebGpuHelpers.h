@@ -28,6 +28,10 @@ wgpu::ShaderModule createShaderModule(const wgpu::Device& device,
                                       const std::string& label,
                                       const char* src);
 
+wgpu::ShaderModule create_shader_from_file(const wgpu::Device& device,
+                                           const std::string& path,
+                                           const std::string& label);
+
 wgpu::Texture createTexture(const wgpu::Device& device,
                             const std::string& label,
                             wgpu::Extent3D extent,

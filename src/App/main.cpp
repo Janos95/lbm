@@ -1,6 +1,6 @@
 #include "Application.h"
 
-int main(int, char*[]) {
+int main(int /*unused*/, char* /*unused*/[]) {
   oak::Application app;
   app.loop();
   return 0;

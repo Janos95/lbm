@@ -204,6 +204,11 @@ T length(Vec<T, Dim> v) {
   return v.norm();
 }
 
+template <class T, size_t Dim>
+T length2(Vec<T, Dim> v) {
+  return v.norm2();
+}
+
 template <class T>
 Vec<T, 3> cross(Vec<T, 3> a, Vec<T, 3> b) {
   return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};

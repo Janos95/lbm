@@ -15,6 +15,8 @@
 #include "WebGpuHelpers.h"
 
 #include <vector>
+#include <fstream>
+#include <sstream>
 
 namespace oak {
 
@@ -40,6 +42,22 @@ wgpu::ShaderModule createShaderModule(const wgpu::Device& device,
   wgslDesc.source = src;
   wgpu::ShaderModuleDescriptor desc{
       .nextInChain = &wgslDesc,
+      .label = label.c_str(),
+  };
+  auto shader = device.CreateShaderModule(&desc);
+  return shader;
+}
+
+wgpu::ShaderModule create_shader_from_file(const wgpu::Device& device,
+                                      const std::string& path, const std::string& label){
+  std::ifstream ifs(path);
+  std::stringstream buffer;
+  buffer << ifs.rdbuf();
+  auto str = buffer.str();
+  wgpu::ShaderModuleWGSLDescriptor wgsl_desciptor;
+  wgsl_desciptor.source = str.c_str();
+  wgpu::ShaderModuleDescriptor desc{
+      .nextInChain = &wgsl_desciptor,
       .label = label.c_str(),
   };
   auto shader = device.CreateShaderModule(&desc);
