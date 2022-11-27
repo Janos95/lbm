@@ -17,7 +17,7 @@
 namespace oak {
 
 // Simulation parameters
-constexpr size_t Nx = 500;    // resolution x-dir
+constexpr size_t Nx = 400;    // resolution x-dir
 constexpr size_t Ny = 100;    // resolution y-dir
 constexpr double rho0 = 100;  // average density
 constexpr double tau = 0.6;   // collision timesclae
@@ -437,11 +437,14 @@ void Application::update_lbm() {
   // # Set reflective boundaries
   //   bndryF = F[cylinder,:]
   //   bndryF = bndryF[:,[0,5,6,7,8,1,2,3,4]]
+  auto bndryF = m_F;
   for (size_t x = 0; x < Nx; ++x) {
     for (size_t y = 0; y < Ny; ++y) {
-      constexpr size_t map[4][2] = {{1, 5}, {2, 6}, {3, 7}, {4, 8}};
-      for (const auto* ls : map) {
-        std::swap(m_F(y, x, ls[0]), m_F(y, x, ls[1]));
+      if (m_cylinder(y, x) != 0.) {
+        constexpr size_t map[] = {0, 5, 6, 7, 8, 1, 2, 3, 4};
+        for (size_t l = 0; l < NL; ++l) {
+          bndryF(y, x, l) = m_F(y, x, map[l]);
+        }
       }
     }
   }
@@ -469,7 +472,7 @@ void Application::update_lbm() {
       max_velocity = std::max(max_velocity, Vec2(ux, uy).norm());
     }
   }
-  //printf("max vel: %f\n", max_velocity);
+  // printf("max vel: %f\n", max_velocity);
 
   // # Apply Collision
   //   Feq = np.zeros(F.shape)
@@ -484,7 +487,7 @@ void Application::update_lbm() {
         double uc = dot(u, c);
         double uc2 = uc * uc;
         double uu = dot(u, u);
-        m_Feq(y, x, l) = rho * weights[l] * (1. + 3. * uc + 9. * uc2 / 2. - 3. * uu * uu / 2.);
+        m_Feq(y, x, l) = rho * weights[l] * (1. + 3. * uc + 9. * uc2 / 2. - 3. * uu / 2.);
       }
     }
   }
@@ -506,7 +509,7 @@ void Application::update_lbm() {
         continue;
       }
       for (size_t l = 0; l < NL; ++l) {
-        m_F(y, x, l) = m_F(y, x, l);
+        m_F(y, x, l) = bndryF(y, x, l);
       }
     }
   }
@@ -553,6 +556,15 @@ inline void create_grid_mesh(Vec2 min,
 void Application::populate_buffers() {
   m_index_data.clear();
   m_vertex_data.clear();
+
+  for (size_t x = 0; x < Nx; ++x) {
+    for (size_t y = 0; y < Ny; ++y) {
+      if (m_cylinder(y, x) != 0.) {
+        m_ux(y,x) = 0.;
+        m_uy(y,x) = 0.;
+      }
+    }
+  }
 
   create_grid_mesh({-1, -0.2}, {1, 0.2}, {Nx, Ny}, m_ux, m_uy, m_vertex_data, m_index_data);
 
