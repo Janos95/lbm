@@ -409,6 +409,9 @@ void Application::loop() {
 }
 
 void Application::update_lbm() {
+
+  fmt::print("F norm2: {}\n", m_F.norm_squared());
+
   // # Simulation Main Loop
   // for it in range(Nt):
   //
@@ -472,7 +475,7 @@ void Application::update_lbm() {
       max_velocity = std::max(max_velocity, Vec2(ux, uy).norm());
     }
   }
-  // printf("max vel: %f\n", max_velocity);
+  printf("max vel: %f\n", max_velocity);
 
   // # Apply Collision
   //   Feq = np.zeros(F.shape)
@@ -482,11 +485,11 @@ void Application::update_lbm() {
     for (size_t y = 0; y < Ny; ++y) {
       Vec2 u(m_ux(y, x), m_uy(y, x));
       double rho = m_rho(y, x);
+      double uu = dot(u, u);
       for (size_t l = 0; l < NL; ++l) {
         Vec2 c(cxs[l], cys[l]);
         double uc = dot(u, c);
         double uc2 = uc * uc;
-        double uu = dot(u, u);
         m_Feq(y, x, l) = rho * weights[l] * (1. + 3. * uc + 9. * uc2 / 2. - 3. * uu / 2.);
       }
     }

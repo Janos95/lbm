@@ -61,6 +61,14 @@ class Tensor {
 
   std::span<const size_t> shape() const { return m_shape; }
 
+  double norm_squared() const {
+    double n2 = 0.;
+    for(double x : m_data){
+      n2 += x * x;
+    }
+    return n2;
+  }
+
  private:
   size_t m_size = 1;
   std::vector<size_t> m_shape;
