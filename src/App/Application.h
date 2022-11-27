@@ -23,7 +23,6 @@ class Application {
 
   void frame();
 
-  void update_lbm();
 
   void populate_buffers();
 
@@ -35,6 +34,8 @@ class Application {
   void encode_compute_pass(wgpu::CommandEncoder&);
 
   void reset_lbm();
+
+  void update_lbm();
 
   GLFWwindow* m_window = nullptr;
 

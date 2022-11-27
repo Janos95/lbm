@@ -5,8 +5,10 @@
 #include "Application.h"
 #include "ColorMaps.h"
 
+#include <fmt/chrono.h>
 #include <fmt/core.h>
 
+#include <chrono>
 #include <numbers>
 #include <numeric>
 #include <random>
@@ -65,7 +67,7 @@ constexpr const char* kShader = R"(
  fn fs_main(in : VertexOutput) -> @location(0) vec4<f32> {
   let u = in.uv.x;
   //return vec4<f32>(0.5*(u + 1.0), 0, 0, 1);
-  let c = textureSample(colormap, colormap_sampler, vec2<f32>(0.48*(u + 1.0) + 0.02, 0));
+  let c = textureSample(colormap, colormap_sampler, vec2<f32>(u/0.1, 0));
   //let c = textureSample(colormap, colormap_sampler, vec2<f32>(0.5*(u + 1.0), 0));
   return c;
 }
@@ -75,7 +77,7 @@ void Application::prepare_compute_pipeline() {
   // Compute shader
   m_lbm_shader = create_shader_from_file(m_device, "lbm.wgsl", "lbm shader");
   m_lbm_descriptor = wgpu::ProgrammableStageDescriptor{
-      .module     = m_lbm_shader,
+      .module = m_lbm_shader,
       .entryPoint = "main",
   };
 
@@ -300,11 +302,10 @@ void Application::initialize_window() {
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
   glfwWindowHint(GLFW_COCOA_RETINA_FRAMEBUFFER, GLFW_FALSE);
 
-  m_window = glfwCreateWindow(kWidth, kHeight, "Tiasa", nullptr, nullptr);
+  m_window = glfwCreateWindow(kWidth, kHeight, "LBM", nullptr, nullptr);
   if (m_window == nullptr) {
     throw std::runtime_error("Failed to create window");
   }
-  printf("Window initialized\n");
 }
 
 inline double square(double x) {
@@ -381,8 +382,25 @@ Application::~Application() {
   glfwTerminate();
 }
 
+inline void set_window_fps(GLFWwindow* win) {
+  static int nb_frames = 0;
+  static auto last_time = std::chrono::steady_clock::now();
+  auto current_time = std::chrono::steady_clock::now();
+  nb_frames++;
+
+  using ms = std::chrono::milliseconds;
+  auto dur = std::chrono::duration_cast<ms>(current_time - last_time);
+  if (dur.count() >= 1000) {
+    auto title = fmt::format("LBM - [Frame time: {}]", dur / nb_frames);
+    glfwSetWindowTitle(win, title.c_str());
+    nb_frames = 0;
+    last_time = current_time;
+  }
+}
+
 void Application::loop() {
   while (glfwWindowShouldClose(m_window) == 0) {
+    set_window_fps(m_window);
     update_lbm();
     populate_buffers();
     frame();
@@ -432,6 +450,7 @@ void Application::update_lbm() {
   //   rho = np.sum(F,2)
   //   ux  = np.sum(F*cxs,2) / rho
   //   uy  = np.sum(F*cys,2) / rho
+  double max_velocity = 0;
   for (size_t x = 0; x < Nx; ++x) {
     for (size_t y = 0; y < Ny; ++y) {
       double& rho = m_rho(y, x);
@@ -447,8 +466,10 @@ void Application::update_lbm() {
       }
       ux /= rho;
       uy /= rho;
+      max_velocity = std::max(max_velocity, Vec2(ux, uy).norm());
     }
   }
+  //printf("max vel: %f\n", max_velocity);
 
   // # Apply Collision
   //   Feq = np.zeros(F.shape)
