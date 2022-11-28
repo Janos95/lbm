@@ -9,6 +9,7 @@ CMakeSettings.json
 .gclient_entries
 .gclient_previous_sync_commits
 third_party/dawn
+third_party/oneTBB
 
 .DS_Store
 src/.DS_Store

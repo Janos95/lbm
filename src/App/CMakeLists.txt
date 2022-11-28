@@ -15,15 +15,10 @@ add_executable(OakApp
 target_link_libraries(OakApp
         Oak::Math
         fmt::fmt
+        TBB::tbb
         webgpu_dawn
         webgpu_cpp
         webgpu_glfw
-    dawncpp
-    dawn_proc
-    dawn_common
-    dawn_glfw
-    dawn_native
-    dawn_wire
         glfw
         )
 

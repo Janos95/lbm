@@ -9,39 +9,33 @@
 #include <fmt/core.h>
 
 #include <chrono>
-#include <fstream>
 #include <numbers>
 #include <numeric>
 #include <random>
 #include <stdexcept>
 
+#include <tbb/parallel_for.h>
+
 namespace oak {
 
 // Simulation parameters
-constexpr size_t Nx = 400;    // resolution x-dir
-constexpr size_t Ny = 100;    // resolution y-dir
+constexpr size_t Nx = 800;    // resolution x-dir
+constexpr size_t Ny = 200;    // resolution y-dir
 constexpr double rho0 = 100;  // average density
 constexpr double tau = 0.6;   // collision timesclae
-// constexpr size_t Nt = 4000;   // number of timesteps
 
 // Lattice speeds / weights
 constexpr size_t NL = 9;
 
-// idxs = np.arange(NL)
-// constexpr size_t idxs[NL] = {0, 1, 2, 3, 4, 5, 6, 7, 8};
-
-// cxs = np.array([0, 0, 1, 1, 1, 0,-1,-1,-1])
 constexpr int cxs[] = {0, 0, 1, 1, 1, 0, -1, -1, -1};
-// cys = np.array([0, 1, 1, 0,-1,-1,-1, 0, 1])
 constexpr int cys[] = {0, 1, 1, 0, -1, -1, -1, 0, 1};
 
-// weights = np.array([4/9,1/9,1/36,1/9,1/36,1/9,1/36,1/9,1/36]) # sums to 1
 constexpr double weights[] = {4. / 9, 1. / 9,  1. / 36, 1. / 9, 1. / 36,
                               1. / 9, 1. / 36, 1. / 9,  1. / 36};
 
 // window size
-constexpr size_t kWidth = Nx;
-constexpr size_t kHeight = Ny;
+constexpr size_t kWidth = 2 * Nx;
+constexpr size_t kHeight = 2 * Ny;
 
 // constexpr double pi = std::numbers::pi;
 
@@ -67,9 +61,7 @@ constexpr const char* kShader = R"(
 @fragment
  fn fs_main(in : VertexOutput) -> @location(0) vec4<f32> {
   let u = in.uv.x;
-  //return vec4<f32>(0.5*(u + 1.0), 0, 0, 1);
-  let c = textureSample(colormap, colormap_sampler, vec2<f32>(u/0.1, 0));
-  //let c = textureSample(colormap, colormap_sampler, vec2<f32>(0.5*(u + 1.0), 0));
+  let c = textureSample(colormap, colormap_sampler, vec2<f32>(5*u, 0));
   return c;
 }
 )";
@@ -215,14 +207,14 @@ void Application::initialize_webgpu() {
   m_surface = wgpu::glfw::CreateSurfaceForWindow(m_instance, m_window);
 
   // Setup swapchain
-  wgpu::SwapChainDescriptor swapchainDesc{
+  wgpu::SwapChainDescriptor swapchain_descriptor{
       .usage = wgpu::TextureUsage::RenderAttachment,
       .format = wgpu::TextureFormat::BGRA8Unorm,
       .width = kWidth,
       .height = kHeight,
       .presentMode = wgpu::PresentMode::Mailbox,
   };
-  m_swapchain = m_device.CreateSwapChain(m_surface, &swapchainDesc);
+  m_swapchain = m_device.CreateSwapChain(m_surface, &swapchain_descriptor);
 
   // Shaders
   m_shader = create_shader_from_source(m_device, "Main Shader Module", kShader);
@@ -257,7 +249,7 @@ void Application::initialize_webgpu() {
       .targets = &target,
   };
 
-  wgpu::RenderPipelineDescriptor pipelineDesc{
+  wgpu::RenderPipelineDescriptor pipeline_descriptor{
       .label = "Main Render Pipeline",
       .layout = nullptr,  // Automatic layout
       .vertex =
@@ -269,7 +261,7 @@ void Application::initialize_webgpu() {
           },
       .fragment = &fragState,
   };
-  m_pipeline = m_device.CreateRenderPipeline(&pipelineDesc);
+  m_pipeline = m_device.CreateRenderPipeline(&pipeline_descriptor);
 
   auto bgl = m_pipeline.GetBindGroupLayout(0);
 
@@ -371,12 +363,12 @@ void Application::reset_lbm() {
   m_ux = Tensor({Ny, Nx});
   m_uy = Tensor({Ny, Nx});
 
-  m_F = Tensor::from_file("/Users/janos/lbm/src/App/initial.txt", {Ny, Nx, NL});
+  //m_F = Tensor::from_file("/Users/janos/lbm/src/App/initial.txt", {Ny, Nx, NL});
 }
 
 void Application::update_lbm() {
   // 50111536.24357496
-  //auto compare_tensors = [](const auto& t1, const auto& t2){
+  // auto compare_tensors = [](const auto& t1, const auto& t2){
   // auto s = t1.size();
   // ASSERT(s == t2.size());
   // double max_d = 0;
@@ -397,6 +389,19 @@ void Application::update_lbm() {
 
   // # Simulation Main Loop
   // for it in range(Nt):
+
+  // F[:, -1, [6, 7, 8]] = F[:, -2, [6, 7, 8]]
+  // F[:, 0, [2, 3, 4]] = F[:, 1, [2, 3, 4]]
+
+  for (size_t y = 0; y < Ny; ++y) {
+    for (size_t l : {6, 7, 8}) {
+      m_F(y, Nx - 1, l) = m_F(y, Nx - 2, l);
+    }
+    for (size_t l : {2, 3, 4}) {
+      m_F(y, size_t(0), l) = m_F(y, size_t(1), l);
+    }
+  }
+
   //
   // Drift
   //   for i, cx, cy in zip(idxs, cxs, cys):
@@ -410,8 +415,10 @@ void Application::update_lbm() {
       return N - 1;
     return i;
   };
+
   auto copy = m_F;
-  for (size_t x = 0; x < Nx; ++x) {
+  tbb::parallel_for(size_t(0), Nx, [&](size_t x) {
+    // for (size_t x = 0; x < Nx; ++x) {
     for (size_t y = 0; y < Ny; ++y) {
       for (size_t l = 0; l < NL; ++l) {
         int x1 = role(int(x) - cxs[l], Nx);
@@ -419,7 +426,8 @@ void Application::update_lbm() {
         copy(y, x, l) = m_F(size_t(y1), size_t(x1), l);
       }
     }
-  }
+  });
+  //}
   m_F = copy;
 
   //{
@@ -431,8 +439,10 @@ void Application::update_lbm() {
   // # Set reflective boundaries
   //   bndryF = F[cylinder,:]
   //   bndryF = bndryF[:,[0,5,6,7,8,1,2,3,4]]
+
   auto bndryF = m_F;
-  for (size_t x = 0; x < Nx; ++x) {
+  tbb::parallel_for(size_t(0), Nx, [&](size_t x) {
+    // for (size_t x = 0; x < Nx; ++x) {
     for (size_t y = 0; y < Ny; ++y) {
       if (m_cylinder(y, x) != 0.) {
         constexpr size_t map[] = {0, 5, 6, 7, 8, 1, 2, 3, 4};
@@ -441,16 +451,17 @@ void Application::update_lbm() {
         }
       }
     }
-  }
-
-
+  });
+  //}
 
   //  Calculate fluid variables
   //   rho = np.sum(F,2)
   //   ux  = np.sum(F*cxs,2) / rho
   //   uy  = np.sum(F*cys,2) / rho
   double max_velocity = 0;
-  for (size_t x = 0; x < Nx; ++x) {
+
+  tbb::parallel_for(size_t(0), Nx, [&](size_t x) {
+    // for (size_t x = 0; x < Nx; ++x) {
     for (size_t y = 0; y < Ny; ++y) {
       double& rho = m_rho(y, x);
       double& ux = m_ux(y, x);
@@ -467,14 +478,17 @@ void Application::update_lbm() {
       uy /= rho;
       max_velocity = std::max(max_velocity, Vec2(ux, uy).norm());
     }
-  }
-  //printf("max vel: %f\n", max_velocity);
+  });
+  //}
+  // printf("max vel: %f\n", max_velocity);
 
   // # Apply Collision
   //   Feq = np.zeros(F.shape)
   //   for i, cx, cy, w in zip(idxs, cxs, cys, weights):
   //     Feq[:,:,i] = rho*w* (1 + 3*(cx*ux+cy*uy) + 9*(cx*ux+cy*uy)**2/2 - 3*(ux**2+uy**2)/2)
-  for (size_t x = 0; x < Nx; ++x) {
+
+  tbb::parallel_for(size_t(0), Nx, [&](size_t x) {
+    // for (size_t x = 0; x < Nx; ++x) {
     for (size_t y = 0; y < Ny; ++y) {
       Vec2 u(m_ux(y, x), m_uy(y, x));
       double rho = m_rho(y, x);
@@ -486,7 +500,8 @@ void Application::update_lbm() {
         m_Feq(y, x, l) = rho * weights[l] * (1. + 3. * uc + 9. * uc2 / 2. - 3. * uu / 2.);
       }
     }
-  }
+  });
+  //}
 
   // F += -(1.0/tau) * (F - Feq)
   for (size_t x = 0; x < Nx; ++x) {
