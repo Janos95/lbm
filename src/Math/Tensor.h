@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Core/Assert.h>
+
 #include <span>
 #include <vector>
 
@@ -8,22 +9,20 @@ namespace oak {
 
 class Tensor {
  public:
+
+  using InitListT = std::initializer_list<size_t>;
+
   Tensor() = default;
 
-  Tensor(std::span<const size_t> shape, double val = 0)
-      : m_shape(shape.begin(), shape.end()), m_strides(shape.size()) {
-    m_strides[0] = 1;
-    for (size_t i = 0; i < shape.size(); ++i) {
-      m_size *= shape.begin()[ptrdiff_t(i)];
-      if (i > 0) {
-        m_strides[i] = m_strides[i - 1] * m_shape[i - 1];
-      }
-    }
-    m_data.resize(m_size, val);
-  }
+  explicit Tensor(std::span<const size_t> shape, double val = 0);
 
-  Tensor(std::initializer_list<size_t> shape, double val = 0)
-      : Tensor(std::span<const size_t>(shape.begin(), shape.size()), val) {}
+  Tensor(std::initializer_list<size_t> shape, double val = 0);
+
+  void reshape(std::span<const size_t> shape);
+
+  void reshape(std::initializer_list<size_t> shape);
+
+  static Tensor from_file(const char* path, InitListT shape);
 
   template <class... Args>
     requires((std::is_same_v<Args, size_t> && ...))
@@ -61,13 +60,7 @@ class Tensor {
 
   std::span<const size_t> shape() const { return m_shape; }
 
-  double norm_squared() const {
-    double n2 = 0.;
-    for(double x : m_data){
-      n2 += x * x;
-    }
-    return n2;
-  }
+  double norm_squared() const;
 
  private:
   size_t m_size = 1;

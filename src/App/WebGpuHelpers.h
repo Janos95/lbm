@@ -18,15 +18,15 @@
 
 namespace oak {
 
-wgpu::Buffer createBufferFromData(const wgpu::Device& device,
-                                  const std::string& label,
-                                  const void* data,
-                                  uint64_t size,
-                                  wgpu::BufferUsage usage);
+wgpu::Buffer create_buffer_from_data(const wgpu::Device& device,
+                                     const std::string& label,
+                                     const void* data,
+                                     uint64_t size,
+                                     wgpu::BufferUsage usage);
 
-wgpu::ShaderModule createShaderModule(const wgpu::Device& device,
-                                      const std::string& label,
-                                      const char* src);
+wgpu::ShaderModule create_shader_from_source(const wgpu::Device& device,
+                                             const std::string& label,
+                                             const char* src);
 
 wgpu::ShaderModule create_shader_from_file(const wgpu::Device& device,
                                            const std::string& path,
@@ -38,10 +38,10 @@ wgpu::Texture createTexture(const wgpu::Device& device,
                             wgpu::TextureFormat format,
                             wgpu::TextureUsage usage);
 
-wgpu::Texture createRgbaUnormTextureFromData(const wgpu::Device& device,
-                                             size_t width,
-                                             size_t height,
-                                             const void* data);
+wgpu::Texture create_rgba_unorm_texture_from_data(const wgpu::Device& device,
+                                                  size_t width,
+                                                  size_t height,
+                                                  const void* data);
 
 // Helpers to make creating bind group layouts look nicer:
 //
@@ -79,13 +79,13 @@ struct BindingLayoutEntryInitializationHelper : wgpu::BindGroupLayoutEntry {
                                          wgpu::ShaderStage entryVisibility,
                                          wgpu::ExternalTextureBindingLayout* bindingLayout);
 
-  // NOLINTNEXTLINE(runtime/explicit)
+  // NOLINTNEXTLINE(google-explicit-constructor)
   BindingLayoutEntryInitializationHelper(const wgpu::BindGroupLayoutEntry& entry);
 };
 
-wgpu::BindGroupLayout makeBindGroupLayout(
+wgpu::BindGroupLayout make_bind_group_layout(
     const wgpu::Device& device,
-    std::initializer_list<BindingLayoutEntryInitializationHelper> entriesInitializer);
+    std::initializer_list<BindingLayoutEntryInitializationHelper> entries_initializer);
 
 // Helpers to make creating bind groups look nicer:
 //
@@ -119,7 +119,7 @@ struct BindingInitializationHelper {
   uint64_t size = 0;
 };
 
-wgpu::BindGroup makeBindGroup(
+wgpu::BindGroup make_bind_group(
     const wgpu::Device& device,
     const wgpu::BindGroupLayout& layout,
     std::initializer_list<BindingInitializationHelper> entriesInitializer);

@@ -20,7 +20,7 @@
 
 namespace oak {
 
-wgpu::Buffer createBufferFromData(const wgpu::Device& device,
+wgpu::Buffer create_buffer_from_data(const wgpu::Device& device,
                                   const std::string& label,
                                   const void* data,
                                   uint64_t size,
@@ -35,7 +35,7 @@ wgpu::Buffer createBufferFromData(const wgpu::Device& device,
   return buffer;
 }
 
-wgpu::ShaderModule createShaderModule(const wgpu::Device& device,
+wgpu::ShaderModule create_shader_from_source(const wgpu::Device& device,
                                       const std::string& label,
                                       const char* src) {
   wgpu::ShaderModuleWGSLDescriptor wgslDesc;
@@ -118,7 +118,7 @@ wgpu::ImageCopyBuffer createImageCopyBuffer(wgpu::Buffer buffer,
 
 }  // namespace
 
-wgpu::Texture createRgbaUnormTextureFromData(const wgpu::Device& device,
+wgpu::Texture create_rgba_unorm_texture_from_data(const wgpu::Device& device,
                                              size_t width,
                                              size_t height,
                                              const void* data) {
@@ -135,7 +135,7 @@ wgpu::Texture createRgbaUnormTextureFromData(const wgpu::Device& device,
 
   auto texture = device.CreateTexture(&desc);
 
-  wgpu::Buffer stagingBuffer = createBufferFromData(
+  wgpu::Buffer stagingBuffer = create_buffer_from_data(
       device, "staging buffer", data, size * 4 * sizeof(unsigned char), wgpu::BufferUsage::CopySrc);
 
   wgpu::ImageCopyBuffer imageCopyBuffer =
@@ -218,7 +218,7 @@ BindingLayoutEntryInitializationHelper::BindingLayoutEntryInitializationHelper(
     const wgpu::BindGroupLayoutEntry& entry)
     : wgpu::BindGroupLayoutEntry(entry) {}
 
-wgpu::BindGroupLayout makeBindGroupLayout(
+wgpu::BindGroupLayout make_bind_group_layout(
     const wgpu::Device& device,
     std::initializer_list<BindingLayoutEntryInitializationHelper> entriesInitializer) {
   std::vector<wgpu::BindGroupLayoutEntry> entries;
@@ -269,7 +269,7 @@ wgpu::BindGroupEntry BindingInitializationHelper::GetAsBinding() const {
   return result;
 }
 
-wgpu::BindGroup makeBindGroup(
+wgpu::BindGroup make_bind_group(
     const wgpu::Device& device,
     const wgpu::BindGroupLayout& layout,
     std::initializer_list<BindingInitializationHelper> entriesInitializer) {

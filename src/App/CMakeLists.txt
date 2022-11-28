@@ -27,5 +27,5 @@ target_link_libraries(OakApp
         glfw
         )
 
-add_warnings(OakApp)
+#add_warnings(OakApp)
 target_include_directories(OakApp PRIVATE "${PROJECT_SOURCE_DIR}/third_party/dawn/include")

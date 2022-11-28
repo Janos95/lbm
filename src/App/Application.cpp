@@ -9,6 +9,7 @@
 #include <fmt/core.h>
 
 #include <chrono>
+#include <fstream>
 #include <numbers>
 #include <numeric>
 #include <random>
@@ -224,7 +225,7 @@ void Application::initialize_webgpu() {
   m_swapchain = m_device.CreateSwapChain(m_surface, &swapchainDesc);
 
   // Shaders
-  m_shader = createShaderModule(m_device, "Main Shader Module", kShader);
+  m_shader = create_shader_from_source(m_device, "Main Shader Module", kShader);
 
   // Pipeline creation
   wgpu::VertexAttribute vertAttributes[2] = {{
@@ -279,15 +280,15 @@ void Application::initialize_webgpu() {
     map.push_back(c[2]);
     map.push_back(255);
   }
-  m_colormap =
-      createRgbaUnormTextureFromData(m_device, 256, 1, reinterpret_cast<const void*>(map.data()));
+  m_colormap = create_rgba_unorm_texture_from_data(m_device, 256, 1,
+                                                   reinterpret_cast<const void*>(map.data()));
 
   wgpu::SamplerDescriptor samplerDesc{.magFilter = wgpu::FilterMode::Linear,
                                       .minFilter = wgpu::FilterMode::Linear};
 
   m_sampler = m_device.CreateSampler(&samplerDesc);
 
-  m_bind_group = makeBindGroup(m_device, bgl, {{0, m_sampler}, {1, m_colormap.CreateView()}});
+  m_bind_group = make_bind_group(m_device, bgl, {{0, m_sampler}, {1, m_colormap.CreateView()}});
 }
 
 void Application::initialize_window() {
@@ -369,6 +370,157 @@ void Application::reset_lbm() {
   m_rho = Tensor({Ny, Nx});
   m_ux = Tensor({Ny, Nx});
   m_uy = Tensor({Ny, Nx});
+
+  m_F = Tensor::from_file("/Users/janos/lbm/src/App/initial.txt", {Ny, Nx, NL});
+}
+
+void Application::update_lbm() {
+  // 50111536.24357496
+  //auto compare_tensors = [](const auto& t1, const auto& t2){
+  // auto s = t1.size();
+  // ASSERT(s == t2.size());
+  // double max_d = 0;
+  // for(size_t i = 0; i < s; ++i){
+  //   auto d = std::abs(t1[i] - t2[i]);
+  //   bool is_ok =  d < 1e-8;
+  //   ASSERT(is_ok);
+  //   max_d = std::max(max_d, d);
+  // }
+  // return max_d;
+  //};
+
+  //{
+  //  auto initial = Tensor::from_file("/Users/janos/lbm/src/App/initial.txt", {Ny, Nx, NL});
+  //  auto d = compare_tensors(initial, m_F);
+  //  fmt::print("initial max d {}\n", d);
+  //}
+
+  // # Simulation Main Loop
+  // for it in range(Nt):
+  //
+  // Drift
+  //   for i, cx, cy in zip(idxs, cxs, cys):
+  //     F[:,:,i] = np.roll(F[:,:,i], cx, axis=1)
+  //     F[:,:,i] = np.roll(F[:,:,i], cy, axis=0)
+
+  auto role = [](int i, int N) {
+    if (i >= N)
+      return 0;
+    if (i < 0)
+      return N - 1;
+    return i;
+  };
+  auto copy = m_F;
+  for (size_t x = 0; x < Nx; ++x) {
+    for (size_t y = 0; y < Ny; ++y) {
+      for (size_t l = 0; l < NL; ++l) {
+        int x1 = role(int(x) - cxs[l], Nx);
+        int y1 = role(int(y) - cys[l], Ny);
+        copy(y, x, l) = m_F(size_t(y1), size_t(x1), l);
+      }
+    }
+  }
+  m_F = copy;
+
+  //{
+  //  auto drift = Tensor::from_file("/Users/janos/lbm/src/App/drift.txt", {Ny, Nx, NL});
+  //  auto d = compare_tensors(drift, m_F);
+  //  fmt::print("max d for drift {}\n", d);
+  //}
+
+  // # Set reflective boundaries
+  //   bndryF = F[cylinder,:]
+  //   bndryF = bndryF[:,[0,5,6,7,8,1,2,3,4]]
+  auto bndryF = m_F;
+  for (size_t x = 0; x < Nx; ++x) {
+    for (size_t y = 0; y < Ny; ++y) {
+      if (m_cylinder(y, x) != 0.) {
+        constexpr size_t map[] = {0, 5, 6, 7, 8, 1, 2, 3, 4};
+        for (size_t l = 0; l < NL; ++l) {
+          bndryF(y, x, l) = m_F(y, x, map[l]);
+        }
+      }
+    }
+  }
+
+
+
+  //  Calculate fluid variables
+  //   rho = np.sum(F,2)
+  //   ux  = np.sum(F*cxs,2) / rho
+  //   uy  = np.sum(F*cys,2) / rho
+  double max_velocity = 0;
+  for (size_t x = 0; x < Nx; ++x) {
+    for (size_t y = 0; y < Ny; ++y) {
+      double& rho = m_rho(y, x);
+      double& ux = m_ux(y, x);
+      double& uy = m_uy(y, x);
+      rho = 0.;
+      ux = 0.;
+      uy = 0.;
+      for (size_t l = 0; l < NL; ++l) {
+        rho += m_F(y, x, l);
+        ux += m_F(y, x, l) * double(cxs[l]);
+        uy += m_F(y, x, l) * double(cys[l]);
+      }
+      ux /= rho;
+      uy /= rho;
+      max_velocity = std::max(max_velocity, Vec2(ux, uy).norm());
+    }
+  }
+  //printf("max vel: %f\n", max_velocity);
+
+  // # Apply Collision
+  //   Feq = np.zeros(F.shape)
+  //   for i, cx, cy, w in zip(idxs, cxs, cys, weights):
+  //     Feq[:,:,i] = rho*w* (1 + 3*(cx*ux+cy*uy) + 9*(cx*ux+cy*uy)**2/2 - 3*(ux**2+uy**2)/2)
+  for (size_t x = 0; x < Nx; ++x) {
+    for (size_t y = 0; y < Ny; ++y) {
+      Vec2 u(m_ux(y, x), m_uy(y, x));
+      double rho = m_rho(y, x);
+      double uu = dot(u, u);
+      for (size_t l = 0; l < NL; ++l) {
+        Vec2 c(cxs[l], cys[l]);
+        double uc = dot(u, c);
+        double uc2 = uc * uc;
+        m_Feq(y, x, l) = rho * weights[l] * (1. + 3. * uc + 9. * uc2 / 2. - 3. * uu / 2.);
+      }
+    }
+  }
+
+  // F += -(1.0/tau) * (F - Feq)
+  for (size_t x = 0; x < Nx; ++x) {
+    for (size_t y = 0; y < Ny; ++y) {
+      for (size_t l = 0; l < NL; ++l) {
+        m_F(y, x, l) += -(1. / tau) * (m_F(y, x, l) - m_Feq(y, x, l));
+      }
+    }
+  }
+
+  //{
+  //  auto collision = Tensor::from_file("/Users/janos/lbm/src/App/collision.txt", {Ny, Nx, NL});
+  //  auto d = compare_tensors(collision, m_F);
+  //  fmt::print("max d for collision {}\n", d);
+  //}
+
+  // # Apply boundary
+  //   F[cylinder,:] = bndryF
+  for (size_t x = 0; x < Nx; ++x) {
+    for (size_t y = 0; y < Ny; ++y) {
+      if (m_cylinder(y, x) == 0.) {
+        continue;
+      }
+      for (size_t l = 0; l < NL; ++l) {
+        m_F(y, x, l) = bndryF(y, x, l);
+      }
+    }
+  }
+
+  //{
+  //  auto boundary = Tensor::from_file("/Users/janos/lbm/src/App/boundary.txt", {Ny, Nx, NL});
+  //  auto d = compare_tensors(boundary, m_F);
+  //  fmt::print("max d for boundary {}\n", d);
+  //}
 }
 
 Application::Application() {
@@ -405,116 +557,6 @@ void Application::loop() {
     populate_buffers();
     frame();
     glfwPollEvents();
-  }
-}
-
-void Application::update_lbm() {
-
-  fmt::print("F norm2: {}\n", m_F.norm_squared());
-
-  // # Simulation Main Loop
-  // for it in range(Nt):
-  //
-  // Drift
-  //   for i, cx, cy in zip(idxs, cxs, cys):
-  //     F[:,:,i] = np.roll(F[:,:,i], cx, axis=1)
-  //     F[:,:,i] = np.roll(F[:,:,i], cy, axis=0)
-
-  auto role = [](int i, int N) {
-    if (i >= N)
-      return 0;
-    if (i < 0)
-      return N - 1;
-    return i;
-  };
-  for (size_t x = 0; x < Nx; ++x) {
-    for (size_t y = 0; y < Ny; ++y) {
-      for (size_t l = 0; l < NL; ++l) {
-        int x1 = role(int(x) + cxs[l], Nx);
-        int y1 = role(int(y) + cys[l], Ny);
-        m_F(y, x, l) = m_F(size_t(y1), size_t(x1), l);
-      }
-    }
-  }
-
-  // # Set reflective boundaries
-  //   bndryF = F[cylinder,:]
-  //   bndryF = bndryF[:,[0,5,6,7,8,1,2,3,4]]
-  auto bndryF = m_F;
-  for (size_t x = 0; x < Nx; ++x) {
-    for (size_t y = 0; y < Ny; ++y) {
-      if (m_cylinder(y, x) != 0.) {
-        constexpr size_t map[] = {0, 5, 6, 7, 8, 1, 2, 3, 4};
-        for (size_t l = 0; l < NL; ++l) {
-          bndryF(y, x, l) = m_F(y, x, map[l]);
-        }
-      }
-    }
-  }
-
-  //  Calculate fluid variables
-  //   rho = np.sum(F,2)
-  //   ux  = np.sum(F*cxs,2) / rho
-  //   uy  = np.sum(F*cys,2) / rho
-  double max_velocity = 0;
-  for (size_t x = 0; x < Nx; ++x) {
-    for (size_t y = 0; y < Ny; ++y) {
-      double& rho = m_rho(y, x);
-      double& ux = m_ux(y, x);
-      double& uy = m_uy(y, x);
-      rho = 0.;
-      ux = 0.;
-      uy = 0.;
-      for (size_t l = 0; l < NL; ++l) {
-        rho += m_F(y, x, l);
-        ux += m_F(y, x, l) * double(cxs[l]);
-        uy += m_F(y, x, l) * double(cys[l]);
-      }
-      ux /= rho;
-      uy /= rho;
-      max_velocity = std::max(max_velocity, Vec2(ux, uy).norm());
-    }
-  }
-  printf("max vel: %f\n", max_velocity);
-
-  // # Apply Collision
-  //   Feq = np.zeros(F.shape)
-  //   for i, cx, cy, w in zip(idxs, cxs, cys, weights):
-  //     Feq[:,:,i] = rho*w* (1 + 3*(cx*ux+cy*uy) + 9*(cx*ux+cy*uy)**2/2 - 3*(ux**2+uy**2)/2)
-  for (size_t x = 0; x < Nx; ++x) {
-    for (size_t y = 0; y < Ny; ++y) {
-      Vec2 u(m_ux(y, x), m_uy(y, x));
-      double rho = m_rho(y, x);
-      double uu = dot(u, u);
-      for (size_t l = 0; l < NL; ++l) {
-        Vec2 c(cxs[l], cys[l]);
-        double uc = dot(u, c);
-        double uc2 = uc * uc;
-        m_Feq(y, x, l) = rho * weights[l] * (1. + 3. * uc + 9. * uc2 / 2. - 3. * uu / 2.);
-      }
-    }
-  }
-
-  // F += -(1.0/tau) * (F - Feq)
-  for (size_t x = 0; x < Nx; ++x) {
-    for (size_t y = 0; y < Ny; ++y) {
-      for (size_t l = 0; l < NL; ++l) {
-        m_F(y, x, l) += -(1. / tau) * (m_F(y, x, l) - m_Feq(y, x, l));
-      }
-    }
-  }
-
-  // # Apply boundary
-  //   F[cylinder,:] = bndryF
-  for (size_t x = 0; x < Nx; ++x) {
-    for (size_t y = 0; y < Ny; ++y) {
-      if (m_cylinder(y, x) == 0.) {
-        continue;
-      }
-      for (size_t l = 0; l < NL; ++l) {
-        m_F(y, x, l) = bndryF(y, x, l);
-      }
-    }
   }
 }
 
@@ -563,21 +605,21 @@ void Application::populate_buffers() {
   for (size_t x = 0; x < Nx; ++x) {
     for (size_t y = 0; y < Ny; ++y) {
       if (m_cylinder(y, x) != 0.) {
-        m_ux(y,x) = 0.;
-        m_uy(y,x) = 0.;
+        m_ux(y, x) = 0.;
+        m_uy(y, x) = 0.;
       }
     }
   }
 
-  create_grid_mesh({-1, -0.2}, {1, 0.2}, {Nx, Ny}, m_ux, m_uy, m_vertex_data, m_index_data);
+  create_grid_mesh({-1, -1}, {1, 1}, {Nx, Ny}, m_ux, m_uy, m_vertex_data, m_index_data);
 
   // Create buffers
   m_index_buffer =
-      createBufferFromData(m_device, "Index Buffer", m_index_data.data(),
-                           m_index_data.size() * sizeof(uint32_t), wgpu::BufferUsage::Index);
+      create_buffer_from_data(m_device, "Index Buffer", m_index_data.data(),
+                              m_index_data.size() * sizeof(uint32_t), wgpu::BufferUsage::Index);
   m_vertex_buffer =
-      createBufferFromData(m_device, "Vertex Buffer", m_vertex_data.data(),
-                           m_vertex_data.size() * sizeof(float), wgpu::BufferUsage::Vertex);
+      create_buffer_from_data(m_device, "Vertex Buffer", m_vertex_data.data(),
+                              m_vertex_data.size() * sizeof(float), wgpu::BufferUsage::Vertex);
 }
 
 void Application::frame() {
